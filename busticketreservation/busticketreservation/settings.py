@@ -86,7 +86,8 @@ WSGI_APPLICATION = 'busticketreservation.wsgi.application'
 # Uses Neon/Supabase in production, falls back to local SQLite if DATABASE_URL is empty
 DATABASES = {
     'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL', f'sqlite:///{BASE_DIR / "db.sqlite3"}')
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600
     )
 }
 
@@ -131,3 +132,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
