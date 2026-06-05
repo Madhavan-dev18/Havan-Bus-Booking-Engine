@@ -1,14 +1,15 @@
 # ticketreservation/views.py
 import os
 from django.conf import settings
-from django.http import FileResponse
+from django.http import FileResponse, JsonResponse
 from django.db import transaction
 from django.contrib.auth.models import User
+from django.core.management import call_command
 
 from rest_framework import viewsets, status, generics, permissions
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.authtoken.models import Token
 
 from .models import Bus, Booking
@@ -155,3 +156,22 @@ class BookingViewSet(viewsets.ModelViewSet):
         response = FileResponse(open(pdf_path, 'rb'), content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{pdf_filename}"'
         return response
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny]) 
+def trigger_daily_buses(request):
+    """Internal endpoint triggered by GitHub Actions to generate buses."""
+    provided_secret = request.headers.get('Authorization')
+    expected_secret = f"Bearer {os.environ.get('CRON_SECRET')}"
+    
+    # Security: Reject if the secret is missing or doesn't match
+    if not os.environ.get('CRON_SECRET') or provided_secret != expected_secret:
+        return JsonResponse({"error": "Unauthorized. Invalid or missing token."}, status=401)
+        
+    try:
+        # Programmatically run the terminal command you built earlier
+        call_command('create_daily_buses')
+        return JsonResponse({"message": "Bus generation script executed successfully."}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
