@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from django.urls import reverse
 from datetime import date, time
-from .models import Bus, Booking
+from ticketreservation.models import Bus
 
 class BusModelTest(TestCase):
     def setUp(self):
