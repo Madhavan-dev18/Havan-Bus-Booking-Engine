@@ -68,3 +68,61 @@ class BusViewsTest(TestCase):
         response = self.client.get(url, {'source': 'City A', 'dest': 'City B'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
+
+from django.test import TransactionTestCase
+from django.db import connection
+from ticketreservation.services import process_ticket_transaction
+from rest_framework.exceptions import ValidationError
+import concurrent.futures
+from unittest.mock import patch
+
+class ConcurrencyBookingTest(TransactionTestCase):
+    def setUp(self):
+        self.user1 = User.objects.create_user(username='user1', password='pw')
+        self.user2 = User.objects.create_user(username='user2', password='pw')
+        self.bus = Bus.objects.create(
+            bus_name="Concurrency Bus",
+            source="A",
+            dest="B",
+            date=date.today(),
+            time=time(10, 0),
+            total_seats=40,
+            available_seats=40,
+            price=100.00
+        )
+    
+    @patch('ticketreservation.services.generate_and_send_ticket.delay')
+    def test_concurrent_seat_booking(self, mock_delay):
+        # We try to book the exact same seat from two different users concurrently
+        passengers = [{"seat": "L-1A", "name": "John", "age": 30, "gender": "M"}]
+        
+        def book_ticket(user):
+            try:
+                # Close old connections in the thread to ensure isolated transactions
+                connection.close()
+                return process_ticket_transaction(user, self.bus.id, passengers)
+            except ValidationError as e:
+                return e
+            except Exception as e:
+                return e
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future1 = executor.submit(book_ticket, self.user1)
+            future2 = executor.submit(book_ticket, self.user2)
+            
+            result1 = future1.result()
+            result2 = future2.result()
+            
+        results = [result1, result2]
+        
+        # Depending on DB backend, concurrency lock might raise ValidationError (if it waits and reads) 
+        # or OperationalError (database locked in SQLite). The key architectural claim is that 
+        # AT MOST ONE transaction can succeed, preventing double booking.
+        success_count = sum(1 for r in results if type(r).__name__ == 'Booking')
+        self.assertLessEqual(success_count, 1, "Concurrency lock failed: Both transactions succeeded!")
+        
+        # Verify seats were deducted correctly (1 or 0 depending on success_count)
+        self.bus.refresh_from_db()
+        expected_seats = 40 - success_count
+        self.assertEqual(self.bus.available_seats, expected_seats)
+
